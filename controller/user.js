@@ -1,138 +1,116 @@
-const express = require("express")
-const UserModel = require('../model/user');
-const ProductModel = require('../model/product');
-// const cloudinary = require("../utils/cloudinary");
-// const upload = require("../utils/multer");
-const bcrypt = require('bcryptjs');
-const salt = 10;
-const jwt = require('jsonwebtoken');
-const cookieParser = require("cookie-parser");
-const app = express();
-app.use(cookieParser());
+const UserModel = require("../model/user");
+const cloudinary = require("../utils/cloudinary");
+const argon2 = require("argon2");
+var fs = require("fs");
 
+const add_user = async (req, res) => {
+  const maybeFile = req.file;
+  const maybePath = maybeFile ? maybeFile.path : undefined;
 
-require('dotenv').config();
-const JWT_SECRET=process.env.JWT;
+  var stats = fs.statSync(maybePath);
+  var fileSizeInBytes = stats.size;
+  var fileSizeInMegabytes = fileSizeInBytes / (1024 * 1024);
 
-const sign_up = async (req, res) => {
+  if (maybePath && fileSizeInMegabytes < 1) {
+    const result = await cloudinary.uploader.upload(maybePath, {
+      folder: "user",
+    });
+    const { name, email, address, type, number, namecard, expired, password } =
+      req.body;
+    const hashPassword = await argon2.hash(password);
     try {
-
-        const {email,password}=req.body;
-        const passwordnya = await bcrypt.hash(password,salt);
-
-        // create instance of user
-        let user = new UserModel({
-            email: email,
-            password: passwordnya
-        });
-
-        // version API
-        // await user.save();
-        // res.json(user);
-
-        //version Web App
-        await user.save();
-        return res.redirect('signin');
-
+      // let simpan;
+      let simpan = await UserModel.create({
+        name: name,
+        email: email,
+        address: address,
+        password: hashPassword,
+        photos: {
+          images: result.secure_url,
+        },
+        creditcards: {
+          type: type,
+          number: number,
+          namecard: namecard,
+          expired: expired,
+        },
+      });
+      // console.log(simpan);
+      res.status(200).json({ user_id: simpan._id });
     } catch (err) {
-        if(err.code === 11000){
-            return res.send({status:'error',error:'email already exists'})
-        }
-        res.render("signin");
-        // throw err
+      if (err.code === 11000) {
+        res.status(400).json({ msg: "nama tidak boleh double" });
+      } else {
+        res.status(400).json({ msg: err.message });
+      }
     }
-}
+  } else {
+    res.status(400).json({ msg: "file image terlalu besar(<1Mb)" });
+  }
+};
 
-const sign_in = async (req, res) => {
+const user_list = async (req, res) => {
+  try {
+    const response = await UserModel.find({});
+    res.status(200).json({
+      count: response.length,
+      rows: [response],
+    });
+  } catch (error) {
+    res.status(500).json({ msg: error.message });
+  }
+};
 
-    const {email, password} = req.body;
+const user_update = async (req, res) => {
+  const id = req.params.id;
+  // const user = await UserModel.findOne({_id: id}).exec();
+//   user.name = req.body.name;
+//   user.email = req.body.email;
+//   user.address = req.body.address;
 
-    const user = await UserModel.findOne({email}).lean()
+  const name = req.body.name;
+  const email = req.body.email;
+  const address = req.body.address;
 
-    if(!user){
-        // res.send({
-        //     status:"failed",
-        //     "message": "Email ditemukan"
-        // })
-        res.render("signin");
-    }
+  // try {
+  //     await UserModel.save();
+  //     res.status(200).json({
+  //         success: true
+  //     });
+  //   } catch (error) {
+  //     res.status(500).json({ msg: error.message });
+  //   }
 
-    if (await bcrypt.compare(password, user.password)){
-        token = jwt.sign({id:user._id,email:user.email},JWT_SECRET,{ expiresIn: '2h'})
+  try {
+    await UserModel.update(
+      {
+        name: name,
+        email: email,
+        address: address,
+        // role: role,
+      },
+      {
+        // where: {
+        id: id,
+        // },
+      }
+    );
+    res.status(200).json({ success: true });
+  } catch (error) {
+    res.status(500).json({ msg: error.message });
+  }
+};
 
-        // version API
-        // res.send({
-        //     status:"success",
-        //     "email":email,
-        //     "password": password,
-        //     "token":token
-        // })
+const user_detail = async (req, res) => {
+  try {
+    const id = req.params.id;
+    const response = await UserModel.findOne({
+      _id: id,
+    });
+    res.status(200).json(response);
+  } catch (error) {
+    res.status(500).json({ msg: error.message });
+  }
+};
 
-        //version Web App
-        res.cookie('token',token,{ maxAge: 2 * 60 * 60 * 1000, httpOnly: true });  // maxAge: 2 hours
-        res.redirect('/');
-
-    } else {
-        // errors = "Password tidak cocok";
-        // res.status(404).json({ errors });
-        res.render("signin");
-    }
-}
-
-const log_out = async(req, res) => {
-    cookie = await req.cookies;
-    for (var prop in cookie) {
-        if (!cookie.hasOwnProperty(prop)) {
-            continue;
-        }    
-        res.cookie(prop, '', {expires: new Date(0)});
-    }
-    res.redirect('/signin');
-}
-
-const home = async (req, res) => {
-    const {token} = req.cookies;
-    if(await verifyToken(token)){
-
-        ProductModel.find((err, products) => {
-            if (!err) {
-                console.log("data products :", products) 
-                res.render("home", {
-                    data: products,
-                    message: "Everythink OK"
-                });
-            } else {
-                console.log('Failed to retrieve the Course List: ' + err);
-                res.render('home')
-            }
-        }); 
-
-    }else{
-        res.redirect('/signin')
-    }
-
-}
-
-
-const signin = async ( req, res ) => {
-    res.render('signin');
-}
-
-// verify token
-const verifyToken = async (token) => {
-    try {
-        const verify = jwt.verify(token, JWT_SECRET);
-        console.log("verify :", verify)
-        const emailnya = verify.email
-        const user = await UserModel.findOne({emailnya}).lean()
-
-        if (user) { return true; } else { return false;}
-
-       
-    } catch (err) {
-        // console.log(JSON.stringify(err), "error");
-        return false;
-    }
-}  
-
-module.exports = {sign_up, sign_in, home, signin,  log_out};
+module.exports = { add_user, user_list, user_update, user_detail };

@@ -1,0 +1,10 @@
+
+POST http://localhost:5000/
+Content-Type: application/json
+
+{
+    "name" : "ceyan",
+    "email" : "aryniscodes@gmail.com",
+    "address" : "Jakarta",
+    
+}

@@ -13,6 +13,6 @@ module.exports = multer({
             cb(new Error("File type is not supported"), false);
             return;
         }
-        cb(null, true)
+        cb(null, true);
     },
 });
